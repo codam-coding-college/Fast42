@@ -71,9 +71,10 @@ class Fast42 {
    *  Recommended value is 1 if your key can do more than 2 req per second.
    * @param {RedisConfig} redisConfig Optional Redis configuration object. If provided, bottleneck will use Redis to store the rate limit counters.
    * This is useful if you want to run multiple instances of your application, and want to share the rate limit counters between them.
+   * @param {scope} Set a custom URL-encoded scope for your token. Default is `public%20projects`.
    * 
    */
-  constructor(secrets: ApiSecret[], concurrentOffset: number = 0, jobExpiration: number = 20000, redisConfig?: RedisConfig) {
+  constructor(secrets: ApiSecret[], concurrentOffset: number = 0, jobExpiration: number = 20000, redisConfig?: RedisConfig, scope: string = "public%20projects") {
     if (secrets.length === 0) {
       throw new Error("Fast42 requires at least one 42 Api Key/Secret pair")
     }
@@ -86,6 +87,7 @@ class Fast42 {
     this._concurrentOffset = concurrentOffset
     this._redisConfig = redisConfig
     this._jobExpiration = jobExpiration
+    this._scope = scope
   }
 
   /*
@@ -95,7 +97,7 @@ class Fast42 {
   async init(): Promise<Fast42> {
     for (let index = 0; index < this._keyCount; index++) {
       const secret: ApiSecret = this._secrets[index]!
-      const accessToken = await this.getAccessToken(secret.client_id, secret.client_secret)
+      const accessToken = await this.getAccessToken(secret.client_id, secret.client_secret, this._scope)
       this.storeToken(accessToken, index)
       const limit = await this.getRateLimits((await this.retrieveToken(index)).access_token)
       let limiter: Bottleneck | undefined;
@@ -311,13 +313,13 @@ class Fast42 {
     return optionsString
   }
 
-  private async getAccessToken(clientid: string, clientsecret: string): Promise<AccessTokenInfo> {
+  private async getAccessToken(clientid: string, clientsecret: string, scope: string): Promise<AccessTokenInfo> {
     const response = await fetch("https://api.intra.42.fr/oauth/token", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
       },
-      body: `grant_type=client_credentials&client_id=${clientid}&client_secret=${clientsecret}&scope=projects%20public`
+      body: `grant_type=client_credentials&client_id=${clientid}&client_secret=${clientsecret}&scope=${scope}`
     })
     if (!response.ok) {
       throw new Error(`Error getting access token: ${response.status} ${response.statusText}`)
@@ -336,7 +338,7 @@ class Fast42 {
       return accessToken
     }
     if (this._secrets[index]) {
-      const newToken = await this.getAccessToken(this._secrets[index]!.client_id, this._secrets[index]!.client_secret)
+      const newToken = await this.getAccessToken(this._secrets[index]!.client_id, this._secrets[index]!.client_secret, this._scope)
       this.storeToken(newToken, index)
       return newToken
     }
